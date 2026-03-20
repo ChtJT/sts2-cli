@@ -24,19 +24,41 @@ using MegaCrit.Sts2.Core.Unlocks;
 namespace Sts2Headless;
 
 /// <summary>
-/// Synchronization context that executes continuations inline on the posting thread.
-/// This is needed because the game engine uses Task.Yield() which would otherwise
-/// post to the ThreadPool, breaking the synchronous execution model in TestMode.
+/// Synchronization context that executes continuations inline immediately.
+/// Task.Yield() posts to SynchronizationContext.Current — by executing inline,
+/// the yield becomes a no-op and the entire async chain runs synchronously.
+/// Uses a recursion guard to queue nested posts and drain them after.
 /// </summary>
 internal class InlineSynchronizationContext : SynchronizationContext
 {
     private readonly Queue<(SendOrPostCallback, object?)> _queue = new();
-    private bool _pumping;
+    private bool _executing;
 
     public override void Post(SendOrPostCallback d, object? state)
     {
-        _queue.Enqueue((d, state));
-        // Don't auto-pump — let the main thread pump explicitly
+        if (_executing)
+        {
+            _queue.Enqueue((d, state));
+            return;
+        }
+        // removed debug log
+
+        // Execute inline immediately, then drain any nested posts
+        _executing = true;
+        try
+        {
+            d(state);
+            // Drain any callbacks that were queued during execution
+            while (_queue.Count > 0)
+            {
+                var (cb, st) = _queue.Dequeue();
+                cb(st);
+            }
+        }
+        finally
+        {
+            _executing = false;
+        }
     }
 
     public override void Send(SendOrPostCallback d, object? state)
@@ -46,18 +68,13 @@ internal class InlineSynchronizationContext : SynchronizationContext
 
     public void Pump()
     {
-        _pumping = true;
-        try
+        // Drain any remaining queued callbacks
+        while (_queue.Count > 0)
         {
-            while (_queue.Count > 0)
-            {
-                var (cb, st) = _queue.Dequeue();
-                cb(st);
-            }
-        }
-        finally
-        {
-            _pumping = false;
+            var (cb, st) = _queue.Dequeue();
+            _executing = true;
+            try { cb(st); }
+            finally { _executing = false; }
         }
     }
 }
@@ -100,8 +117,8 @@ public class RunSimulator
             RunManager.Instance.SetUpTest(_runState, netService);
             LocalContext.NetId = netService.NetId;
 
-            // Skip Neow event (requires localization data we don't have)
-            // Must be set AFTER SetUpTest which calls InitializeNewRun -> SetStartedWithNeowFlag
+            // Skip Neow event — it requires complex multi-page interaction.
+            // Non-Neow events (which have simpler option structures) work with our loc patches.
             _runState.ExtraFields.StartedWithNeow = false;
 
             // Generate rooms for all acts
@@ -256,66 +273,50 @@ public class RunSimulator
     {
         if (!CombatManager.Instance.IsPlayPhase)
         {
-            // Wait a bit — might be between phases
-            for (int i = 0; i < 100; i++)
-            {
-                _syncCtx.Pump();
-                Thread.Sleep(5);
-                if (CombatManager.Instance.IsPlayPhase) break;
-                if (!CombatManager.Instance.IsInProgress) return DetectDecisionPoint();
-                if (player.Creature.IsDead) return DetectDecisionPoint();
-            }
+            // Might be between phases — pump and check
+            _syncCtx.Pump();
             if (!CombatManager.Instance.IsPlayPhase)
-                return DetectDecisionPoint(); // Return current state instead of error
+            {
+                if (!CombatManager.Instance.IsInProgress || player.Creature.IsDead)
+                    return DetectDecisionPoint();
+                // Brief wait for ThreadPool if sync context didn't catch it
+                Thread.Sleep(100);
+                _syncCtx.Pump();
+                if (!CombatManager.Instance.IsPlayPhase)
+                    return DetectDecisionPoint();
+            }
         }
 
-        var prevRound = CombatManager.Instance.DebugOnlyGetState()?.RoundNumber ?? 0;
-        Log($"Ending turn (round={prevRound})");
-        // Reset event signals
+        Log($"Ending turn (round={CombatManager.Instance.DebugOnlyGetState()?.RoundNumber ?? 0})");
         _turnStarted.Reset();
         _combatEnded.Reset();
 
-        PlayerCmd.EndTurn(player, canBackOut: false);
-
-        // EndTurn triggers an async chain that includes Task.Yield() running on ThreadPool.
-        // We use a combination of event-based and polling detection.
-        // Retry loop: if first attempt times out, call EndTurn again.
-        for (int attempt = 0; attempt < 3; attempt++)
+        // Suppress Task.Yield() during end-turn to force synchronous execution
+        YieldPatches.SuppressYield = true;
+        try
         {
-            var deadline = Environment.TickCount64 + 1500;
-            bool advanced = false;
-            while (Environment.TickCount64 < deadline)
-            {
-                _syncCtx.Pump();
-                if (_turnStarted.IsSet || _combatEnded.IsSet) { advanced = true; break; }
-                if (!CombatManager.Instance.IsInProgress || player.Creature.IsDead) { advanced = true; break; }
-                var curRound = CombatManager.Instance.DebugOnlyGetState()?.RoundNumber ?? 0;
-                if (curRound > prevRound) { advanced = true; break; }
-                Thread.Sleep(2);
-            }
-
-            if (advanced) break;
-
-            // Turn didn't advance. The ThreadPool task may have stalled.
-            // Reset and try again.
-            Log($"Turn transition attempt {attempt + 1} timed out, retrying...");
-            _turnStarted.Reset();
-            _combatEnded.Reset();
-
-            // Re-trigger the end turn process
-            try
-            {
-                CombatManager.Instance.SetReadyToBeginEnemyTurn(player);
-            }
-            catch (Exception ex)
-            {
-                Log($"SetReadyToBeginEnemyTurn: {ex.Message}");
-            }
+            PlayerCmd.EndTurn(player, canBackOut: false);
+            _syncCtx.Pump();
+        }
+        finally
+        {
+            YieldPatches.SuppressYield = false;
         }
 
-        _syncCtx.Pump();
-        Thread.Sleep(50);
-        _syncCtx.Pump();
+        // Brief fallback wait if the sync context didn't capture everything
+        if (CombatManager.Instance.IsInProgress && !CombatManager.Instance.IsPlayPhase
+            && !player.Creature.IsDead)
+        {
+            // Wait up to 2s for ThreadPool stragglers
+            for (int i = 0; i < 100; i++)
+            {
+                _syncCtx.Pump();
+                if (_turnStarted.IsSet || _combatEnded.IsSet) break;
+                if (!CombatManager.Instance.IsInProgress || player.Creature.IsDead) break;
+                if (CombatManager.Instance.IsPlayPhase) break;
+                Thread.Sleep(20);
+            }
+        }
 
         return DetectDecisionPoint();
     }
@@ -636,18 +637,16 @@ public class RunSimulator
         Log($"Post-combat: RoomType={combatRoom.RoomType}, IsPreFinished={combatRoom.IsPreFinished}");
 
         // Wait for async reward processing to complete
-        for (int i = 0; i < 50; i++)
-        {
-            _syncCtx.Pump();
-            Thread.Sleep(50);
-        }
+        _syncCtx.Pump();
+        Thread.Sleep(100);
+        _syncCtx.Pump();
 
         // Check if boss fight → act transition
         if (combatRoom.RoomType == RoomType.Boss)
         {
             Log("Boss defeated, entering next act");
             RunManager.Instance.EnterNextAct().GetAwaiter().GetResult();
-            for (int i = 0; i < 50; i++) { _syncCtx.Pump(); Thread.Sleep(50); }
+            _syncCtx.Pump();
             WaitForActionExecutor();
             return DetectDecisionPoint();
         }
@@ -662,7 +661,7 @@ public class RunSimulator
             Log($"ProceedFromTerminalRewardsScreen: {ex.Message}");
         }
 
-        for (int i = 0; i < 50; i++) { _syncCtx.Pump(); Thread.Sleep(50); }
+        _syncCtx.Pump();
         WaitForActionExecutor();
 
         // Check if we're now at the map
@@ -690,36 +689,43 @@ public class RunSimulator
     private Dictionary<string, object?> EventChoiceState(EventRoom eventRoom)
     {
         var localEvent = RunManager.Instance.EventSynchronizer?.GetLocalEvent();
+        _syncCtx.Pump();
 
-        // Events need localization to generate options. Without it, skip the event.
-        if (localEvent == null || (localEvent.CurrentOptions?.Count ?? 0) == 0)
+        // If event is finished, proceed to map
         {
-            Log($"Event {localEvent?.GetType().Name ?? "null"} has no options, auto-skipping");
-            // Force exit event room and go to map
+            Log($"Event {localEvent?.GetType().Name ?? "null"} finished, proceeding");
             try
             {
-                RunManager.Instance.EnterRoom(new MapRoom()).GetAwaiter().GetResult();
-                for (int i = 0; i < 20; i++) { _syncCtx.Pump(); Thread.Sleep(20); }
+                RunManager.Instance.ProceedFromTerminalRewardsScreen().GetAwaiter().GetResult();
+                _syncCtx.Pump();
             }
-            catch (Exception ex)
+            catch { }
+            // Force to map if still in event room
+            if (_runState?.CurrentRoom is EventRoom)
             {
-                Log($"Skip event failed: {ex.Message}");
+                try { RunManager.Instance.EnterRoom(new MapRoom()).GetAwaiter().GetResult(); _syncCtx.Pump(); }
+                catch { }
             }
+            return _runState?.CurrentRoom is MapRoom ? MapSelectState() : DetectDecisionPoint();
+        }
+
+        var currentOptions = localEvent.CurrentOptions;
+        if (currentOptions == null || currentOptions.Count == 0)
+        {
+            Log($"Event {localEvent.GetType().Name} has no options, auto-skipping");
+            try { RunManager.Instance.EnterRoom(new MapRoom()).GetAwaiter().GetResult(); _syncCtx.Pump(); }
+            catch { }
             return MapSelectState();
         }
 
-        if (localEvent.IsFinished)
-        {
-            RunManager.Instance.ProceedFromTerminalRewardsScreen().GetAwaiter().GetResult();
-            WaitForActionExecutor();
-            return DetectDecisionPoint();
-        }
-
-        var options = localEvent.CurrentOptions
+        var options = currentOptions
             .Select((opt, i) => new Dictionary<string, object?>
             {
                 ["index"] = i,
-                ["description"] = opt.Description?.ToString() ?? "Option " + i,
+                ["title"] = opt.Title?.LocEntryKey ?? opt.TextKey ?? $"option_{i}",
+                ["description"] = opt.Description?.LocEntryKey ?? "",
+                ["text_key"] = opt.TextKey,
+                ["is_locked"] = opt.IsLocked,
             }).ToList();
 
         return new Dictionary<string, object?>
@@ -727,7 +733,7 @@ public class RunSimulator
             ["type"] = "decision",
             ["decision"] = "event_choice",
             ["event_name"] = localEvent.GetType().Name,
-            ["description"] = localEvent.Description?.ToString() ?? "",
+            ["description"] = localEvent.Description?.LocEntryKey ?? "",
             ["options"] = options,
             ["player"] = PlayerSummary(_runState!.Players[0]),
         };
@@ -890,12 +896,31 @@ public class RunSimulator
 
         TestMode.IsOn = true;
 
-        // Install inline synchronization context so Task.Yield() executes inline
+        // Install inline sync context on main thread
         SynchronizationContext.SetSynchronizationContext(_syncCtx);
 
-        // Initialize SaveManager with a dummy profile to prevent crashes
+        // Initialize PlatformServices before anything touches PlatformUtil
+        try
+        {
+            // Try to access PlatformUtil to trigger its static init
+            // If it fails, it won't be available but most code checks SteamInitializer.Initialized
+            var _ = MegaCrit.Sts2.Core.Platform.PlatformUtil.PrimaryPlatform;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] PlatformUtil init: {ex.Message}");
+        }
+
+        // Initialize SaveManager with a dummy profile for save/load support
         try { SaveManager.Instance.InitProfileId(0); }
         catch (Exception ex) { Console.Error.WriteLine($"[WARN] SaveManager.InitProfileId: {ex.Message}"); }
+
+        // Initialize progress data for epoch/timeline tracking
+        try { SaveManager.Instance.InitProgressData(); }
+        catch (Exception ex) { Console.Error.WriteLine($"[WARN] InitProgressData: {ex.Message}"); }
+
+        // Patch Task.Yield() with a controllable flag — only active during end_turn
+        PatchTaskYield();
 
         // Initialize localization system (needed for events, cards, etc.)
         InitLocManager();
@@ -943,6 +968,54 @@ public class RunSimulator
         };
     }
 
+    private static void PatchTaskYield()
+    {
+        try
+        {
+            var harmony = new Harmony("sts2headless.yieldpatch");
+
+            // Patch YieldAwaitable.YieldAwaiter.IsCompleted to return true
+            // This makes `await Task.Yield()` execute synchronously (continuation runs inline)
+            var yieldAwaiterType = typeof(System.Runtime.CompilerServices.YieldAwaitable)
+                .GetNestedType("YieldAwaiter");
+            if (yieldAwaiterType != null)
+            {
+                var isCompletedProp = yieldAwaiterType.GetProperty("IsCompleted");
+                if (isCompletedProp != null)
+                {
+                    var getter = isCompletedProp.GetGetMethod();
+                    var prefix = typeof(YieldPatches).GetMethod(nameof(YieldPatches.IsCompletedPrefix),
+                        System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
+                    if (getter != null && prefix != null)
+                    {
+                        harmony.Patch(getter, new HarmonyMethod(prefix));
+                        Console.Error.WriteLine("[INFO] Patched Task.Yield() to be synchronous");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] Failed to patch Task.Yield: {ex.Message}");
+        }
+    }
+
+    internal static class YieldPatches
+    {
+        // Only suppress Task.Yield() when this flag is set (during end_turn processing)
+        public static volatile bool SuppressYield;
+
+        public static bool IsCompletedPrefix(ref bool __result)
+        {
+            if (SuppressYield)
+            {
+                __result = true;
+                return false;
+            }
+            return true; // Let normal Yield behavior run
+        }
+    }
+
     private static void InitLocManager()
     {
         // Create a LocManager instance with stub tables via reflection.
@@ -988,9 +1061,33 @@ public class RunSimulator
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
             try { cultureProp?.SetValue(instance, System.Globalization.CultureInfo.InvariantCulture); } catch { }
 
+            // Initialize _smartFormatter so SmartFormat() doesn't crash
+            try
+            {
+                var sfField = typeof(LocManager).GetField("_smartFormatter",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                if (sfField != null)
+                {
+                    // Create a SmartFormatter using the SmartFormat library
+                    var smartFormatType = sfField.FieldType; // SmartFormat.SmartFormatter
+                    var sfInstance = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(smartFormatType);
+                    sfField.SetValue(instance, sfInstance);
+                }
+            }
+            catch (Exception ex) { Console.Error.WriteLine($"[WARN] _smartFormatter init: {ex.Message}"); }
+
+            // Initialize _engTables to point to _tables (avoid null ref in fallback)
+            try
+            {
+                var engTablesField = typeof(LocManager).GetField("_engTables",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                engTablesField?.SetValue(instance, tables);
+            }
+            catch { }
+
             Console.Error.WriteLine("[INFO] LocManager initialized with stub tables");
 
-            // Use Harmony to patch methods that access uninitialized internal state
+            // Use Harmony to patch methods that need fallback behavior
             var harmony = new Harmony("sts2headless.locpatch");
 
             // Patch LocString.GetFormattedText to return LocEntryKey directly
@@ -1047,13 +1144,52 @@ public class RunSimulator
                 System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
             if (getLocString != null && glsPrefix != null)
             {
-                harmony.Patch(getLocString, new HarmonyMethod(glsPrefix));
+                try { harmony.Patch(getLocString, new HarmonyMethod(glsPrefix)); }
+                catch (Exception ex4) { Console.Error.WriteLine($"[WARN] Failed to patch GetLocString: {ex4.Message}"); }
             }
+
+            // Patch HasEntry to always return true
+            PatchMethod(harmony, typeof(LocTable), "HasEntry", nameof(LocPatches.HasEntryPrefix));
+
+            // Patch IsLocalKey to always return true
+            PatchMethod(harmony, typeof(LocTable), "IsLocalKey", nameof(LocPatches.HasEntryPrefix));
+
+            // Patch LocString.Exists (static) to always return true
+            var locStringExists = typeof(LocString).GetMethod("Exists",
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
+            if (locStringExists != null)
+            {
+                PatchMethod(harmony, locStringExists, nameof(LocPatches.HasEntryPrefix));
+            }
+
+            // Patch LocTable.GetLocStringsWithPrefix to return empty list
+            PatchMethod(harmony, typeof(LocTable), "GetLocStringsWithPrefix", nameof(LocPatches.GetLocStringsWithPrefixPrefix));
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"[WARN] InitLocManager failed: {ex.Message}");
         }
+    }
+
+    private static void PatchMethod(Harmony harmony, Type type, string methodName, string patchName)
+    {
+        try
+        {
+            var method = type.GetMethod(methodName, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            PatchMethod(harmony, method, patchName);
+        }
+        catch (Exception ex) { Console.Error.WriteLine($"[WARN] Failed to patch {type.Name}.{methodName}: {ex.Message}"); }
+    }
+
+    private static void PatchMethod(Harmony harmony, System.Reflection.MethodInfo? method, string patchName)
+    {
+        if (method == null) return;
+        try
+        {
+            var prefix = typeof(LocPatches).GetMethod(patchName, System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public);
+            if (prefix != null) harmony.Patch(method, new HarmonyMethod(prefix));
+        }
+        catch (Exception ex) { Console.Error.WriteLine($"[WARN] Failed to patch {method.Name}: {ex.Message}"); }
     }
 
     internal static class LocPatches
@@ -1077,13 +1213,24 @@ public class RunSimulator
             return false;
         }
 
+        public static bool HasEntryPrefix(ref bool __result)
+        {
+            __result = true;
+            return false;
+        }
+
         public static bool GetLocStringPrefix(LocTable __instance, string key, ref LocString __result)
         {
-            // Use reflection to get table name
             var nameField = typeof(LocTable).GetField("_name",
                 System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
             var tableName = nameField?.GetValue(__instance) as string ?? "_unknown";
             __result = new LocString(tableName, key);
+            return false;
+        }
+
+        public static bool GetLocStringsWithPrefixPrefix(ref IReadOnlyList<LocString> __result)
+        {
+            __result = new List<LocString>();
             return false;
         }
     }
