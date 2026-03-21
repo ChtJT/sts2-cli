@@ -78,3 +78,19 @@
 ## Bug Found
 - Potion usage code exists but agent never triggers it
 - Need to add potion usage to combat strategy
+
+## Game w26 Analysis (Floor 11 defeat, Demon Form seed)
+- Got Demon Form at F3 (score 100 — best possible card!)
+- Got Battle Trance (draw 3), Feel No Pain, Pommel Strike
+- Used Strength Potion (+2 STR) and Flex Potion (+5 STR) ✅
+- Bought Toolbox + Planisphere relics from shop
+- Powers display working: Strength=2, Vulnerable=2, Shrink=-1, FLEX=5
+- Died to Raiders at F11 (3 enemies, 16+30 incoming damage)
+- Key issue: Demon Form costs 3 energy, uses entire turn to play
+- Key issue: 15-card deck means Demon Form drawn every ~3 turns
+- Need: play Demon Form ASAP, then survive while strength builds
+
+## Neow Blessings Working!
+- Golden Pearl (+150 gold) was selected and applied
+- 3 options shown correctly from Neow event
+- Avg floor improved from 8.4 to 9.2 with Neow
