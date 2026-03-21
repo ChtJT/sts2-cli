@@ -997,6 +997,13 @@ public class RunSimulator
                 }
                 catch { }
 
+                // Enemy powers
+                var ePowers = e.Powers?.Select(pw => new Dictionary<string, object?>
+                {
+                    ["name"] = _loc.Power(pw.Id.Entry),
+                    ["amount"] = pw.Amount,
+                }).ToList();
+
                 return new Dictionary<string, object?>
                 {
                     ["index"] = i,
@@ -1006,8 +1013,16 @@ public class RunSimulator
                     ["block"] = e.Block,
                     ["intents"] = intents.Count > 0 ? intents : null,
                     ["intends_attack"] = e.Monster?.IntendsToAttack ?? false,
+                    ["powers"] = ePowers?.Count > 0 ? ePowers : null,
                 };
             }).ToList() ?? new();
+
+        // Player powers/buffs
+        var playerPowers = player.Creature?.Powers?.Select(pw => new Dictionary<string, object?>
+        {
+            ["name"] = _loc.Power(pw.Id.Entry),
+            ["amount"] = pw.Amount,
+        }).ToList();
 
         var result = new Dictionary<string, object?>
         {
@@ -1020,6 +1035,7 @@ public class RunSimulator
             ["hand"] = hand,
             ["enemies"] = enemies,
             ["player"] = PlayerSummary(player),
+            ["player_powers"] = playerPowers?.Count > 0 ? playerPowers : null,
             ["draw_pile_count"] = pcs?.DrawPile?.Cards?.Count ?? 0,
             ["discard_pile_count"] = pcs?.DiscardPile?.Cards?.Count ?? 0,
         };
