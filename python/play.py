@@ -39,13 +39,17 @@ def short_n(obj):
     return str(obj)
 
 def desc(obj):
-    """Extract description, strip BBCode tags."""
+    """Extract description, strip BBCode tags, clean template vars."""
     if isinstance(obj, dict) and "en" in obj:
         import re
         text = obj.get("zh") or obj.get("en") or ""
         text = re.sub(r'\[/?[^\]]+\]', '', text)  # strip [tags]
-        text = re.sub(r'\{[^}]+\}', '?', text)    # replace {vars} with ?
-        return text
+        # Clean template vars: {Heal} → [Heal], {Damage:diff()} → [Damage]
+        def clean_var(m):
+            var = m.group(1).split(':')[0]  # take name before ':'
+            return f"[{var}]"
+        text = re.sub(r'\{([^}]+)\}', clean_var, text)
+        return text.strip()
     return ""
 
 COLORS = {

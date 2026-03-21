@@ -853,6 +853,7 @@ public class RunSimulator
         {
             ["type"] = "decision",
             ["decision"] = "unknown",
+            ["context"] = RunContext(),
             ["room_type"] = room?.GetType().Name,
             ["message"] = "Unknown room type or state",
         };
@@ -924,6 +925,7 @@ public class RunSimulator
         {
             ["type"] = "decision",
             ["decision"] = "map_select",
+            ["context"] = RunContext(),
             ["choices"] = choices,
             ["player"] = PlayerSummary(_runState!.Players[0]),
             ["act"] = _runState.CurrentActIndex + 1,
@@ -1134,6 +1136,7 @@ public class RunSimulator
         {
             ["type"] = "decision",
             ["decision"] = "card_reward",
+            ["context"] = RunContext(),
             ["cards"] = cards,
             ["can_skip"] = _pendingCardReward.CanSkip,
             ["player"] = PlayerSummary(_runState!.Players[0]),
@@ -1203,6 +1206,7 @@ public class RunSimulator
         {
             ["type"] = "decision",
             ["decision"] = "event_choice",
+            ["context"] = RunContext(),
             ["event_name"] = localEvent.GetType().Name,
             ["description"] = localEvent.Description?.LocEntryKey ?? "",
             ["options"] = options,
@@ -1235,6 +1239,7 @@ public class RunSimulator
         {
             ["type"] = "decision",
             ["decision"] = "rest_site",
+            ["context"] = RunContext(),
             ["options"] = optionList,
             ["player"] = PlayerSummary(player),
         };
@@ -1278,6 +1283,7 @@ public class RunSimulator
         {
             ["type"] = "decision",
             ["decision"] = "shop",
+            ["context"] = RunContext(),
             ["cards"] = cards,
             ["relics"] = relics,
             ["potions"] = potions,
@@ -1310,6 +1316,7 @@ public class RunSimulator
         {
             ["type"] = "decision",
             ["decision"] = "game_over",
+            ["context"] = RunContext(),
             ["victory"] = isVictory,
             ["player"] = PlayerSummary(player),
             ["act"] = _runState.CurrentActIndex + 1,
