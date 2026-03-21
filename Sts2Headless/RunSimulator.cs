@@ -595,23 +595,33 @@ public class RunSimulator
             }
         }
 
-        // For rest sites, use RestSiteSynchronizer
+        // For rest sites — execute the option directly
         if (_runState?.CurrentRoom is RestSiteRoom restSiteRoom)
         {
             var restOptions = restSiteRoom.Options;
             if (restOptions != null && optionIndex >= 0 && optionIndex < restOptions.Count)
             {
+                var option = restOptions[optionIndex];
+                Log($"Rest site: executing option {option.OptionId}");
+                try
+                {
+                    option.OnSelect().GetAwaiter().GetResult();
+                    _syncCtx.Pump();
+                }
+                catch (Exception ex) { Log($"Rest site OnSelect: {ex.Message}"); }
+            }
+            else
+            {
+                // Fallback: try through synchronizer
                 try
                 {
                     RunManager.Instance.RestSiteSynchronizer.ChooseLocalOption(optionIndex).GetAwaiter().GetResult();
                     _syncCtx.Pump();
                 }
-                catch (Exception ex) { Log($"Rest site choose: {ex.Message}"); }
+                catch (Exception ex) { Log($"Rest site sync: {ex.Message}"); }
             }
-            else
-            {
-                Log($"Rest site: invalid option index {optionIndex}, skipping");
-            }
+            // After rest, go to map
+            ForceToMap();
         }
 
         WaitForActionExecutor();
@@ -1040,10 +1050,20 @@ public class RunSimulator
 
         if (options == null || options.Count == 0)
         {
-            // Fallback: manually heal and proceed
-            Log("Rest site has no options, auto-healing");
-            var healAmount = (int)(player.Creature.MaxHp * 0.3m);
-            try { player.Creature.HealInternal(healAmount); } catch { }
+            // Fallback: heal 30% max HP using the proper method
+            Log("Rest site has no options, using fallback heal");
+            try
+            {
+                MegaCrit.Sts2.Core.Entities.RestSite.HealRestSiteOption.ExecuteRestSiteHeal(player, isMimicked: false)
+                    .GetAwaiter().GetResult();
+                _syncCtx.Pump();
+            }
+            catch
+            {
+                // Last resort: manual heal
+                var healAmount = (int)(player.Creature.MaxHp * 0.3m);
+                player.Creature.HealInternal(healAmount);
+            }
             ForceToMap();
             return MapSelectState();
         }
@@ -1196,6 +1216,7 @@ public class RunSimulator
             ["name"] = _loc.Bilingual("characters", (player.Character?.Id.Entry ?? "IRONCLAD") + ".title"),
             ["hp"] = player.Creature?.CurrentHp ?? 0,
             ["max_hp"] = player.Creature?.MaxHp ?? 0,
+            ["block"] = player.Creature?.Block ?? 0,
             ["gold"] = player.Gold,
             ["relics"] = player.Relics?.Select(r => _loc.Relic(r.Id.Entry)).ToList(),
             ["potions"] = player.Potions?.Where(p => p != null).Select(p => _loc.Potion(p!.Id.Entry)).ToList(),
