@@ -604,10 +604,49 @@ public class RunSimulator
             }
         }
 
-        Log($"Using potion: {potion.GetType().Name}");
-        var action = new MegaCrit.Sts2.Core.GameActions.UsePotionAction(potion, target, CombatManager.Instance.IsInProgress);
-        RunManager.Instance.ActionQueueSet.EnqueueWithoutSynchronizing(action);
-        WaitForActionExecutor();
+        // Auto-target: self-targeting potions target the player, enemy-targeting target first enemy
+        if (target == null && CombatManager.Instance.IsInProgress)
+        {
+            var targetType = potion.TargetType;
+            if (targetType == TargetType.Self || targetType == TargetType.TargetedNoCreature)
+            {
+                target = player.Creature;
+            }
+            else if (targetType == TargetType.AnyEnemy)
+            {
+                var combatState = CombatManager.Instance.DebugOnlyGetState();
+                target = combatState?.Enemies?.FirstOrDefault(e => e != null && e.IsAlive);
+            }
+            else
+            {
+                // Default to player for non-combat or unknown target types
+                target = player.Creature;
+            }
+        }
+
+        Log($"Using potion: {potion.GetType().Name} at slot {idx} target={target?.GetType().Name ?? "none"}");
+        try
+        {
+            var action = new MegaCrit.Sts2.Core.GameActions.UsePotionAction(potion, target, CombatManager.Instance.IsInProgress);
+            RunManager.Instance.ActionQueueSet.EnqueueWithoutSynchronizing(action);
+            WaitForActionExecutor();
+            _syncCtx.Pump();
+            // Verify potion was consumed
+            var afterPotions = player.Potions?.ToList() ?? new();
+            if (idx < afterPotions.Count && afterPotions[idx] == potion)
+            {
+                // Potion wasn't consumed — manually discard it
+                Log("Potion not consumed by action, manually discarding");
+                MegaCrit.Sts2.Core.Commands.PotionCmd.Discard(potion).GetAwaiter().GetResult();
+                _syncCtx.Pump();
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"Use potion failed: {ex.Message}");
+            // Try manual discard as fallback
+            try { MegaCrit.Sts2.Core.Commands.PotionCmd.Discard(potion).GetAwaiter().GetResult(); } catch { }
+        }
 
         return DetectDecisionPoint();
     }
