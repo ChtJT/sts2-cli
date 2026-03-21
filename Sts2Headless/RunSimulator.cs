@@ -1854,6 +1854,68 @@ public class RunSimulator
         };
     }
 
+    public Dictionary<string, object?> GetFullMap()
+    {
+        if (_runState?.Map == null)
+            return Error("No map available");
+
+        var map = _runState.Map;
+        var rows = new List<List<Dictionary<string, object?>>>();
+        var currentCoord = _runState.CurrentMapCoord;
+        var visited = _runState.VisitedMapCoords;
+
+        for (int row = 0; row < map.GetRowCount(); row++)
+        {
+            var rowNodes = new List<Dictionary<string, object?>>();
+            foreach (var point in map.GetPointsInRow(row))
+            {
+                if (point == null) continue;
+                var children = point.Children?.Select(ch => new Dictionary<string, object?>
+                {
+                    ["col"] = (int)ch.coord.col,
+                    ["row"] = (int)ch.coord.row,
+                }).ToList();
+
+                var isVisited = visited?.Any(v => v.col == point.coord.col && v.row == point.coord.row) ?? false;
+                var isCurrent = currentCoord.HasValue &&
+                    currentCoord.Value.col == point.coord.col && currentCoord.Value.row == point.coord.row;
+
+                rowNodes.Add(new Dictionary<string, object?>
+                {
+                    ["col"] = (int)point.coord.col,
+                    ["row"] = (int)point.coord.row,
+                    ["type"] = point.PointType.ToString(),
+                    ["children"] = children,
+                    ["visited"] = isVisited,
+                    ["current"] = isCurrent,
+                });
+            }
+            if (rowNodes.Count > 0)
+                rows.Add(rowNodes);
+        }
+
+        // Boss node
+        var bossNode = new Dictionary<string, object?>
+        {
+            ["col"] = (int)map.BossMapPoint.coord.col,
+            ["row"] = (int)map.BossMapPoint.coord.row,
+            ["type"] = map.BossMapPoint.PointType.ToString(),
+        };
+
+        return new Dictionary<string, object?>
+        {
+            ["type"] = "map",
+            ["context"] = RunContext(),
+            ["rows"] = rows,
+            ["boss"] = bossNode,
+            ["current_coord"] = currentCoord.HasValue ? new Dictionary<string, object?>
+            {
+                ["col"] = (int)currentCoord.Value.col,
+                ["row"] = (int)currentCoord.Value.row,
+            } : null,
+        };
+    }
+
     public void CleanUp()
     {
         try

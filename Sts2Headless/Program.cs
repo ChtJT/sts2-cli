@@ -110,6 +110,9 @@ class Program
                 return sim.ExecuteAction(action, actionArgs);
             }
 
+            case "get_map":
+                return sim.GetFullMap();
+
             case "quit":
                 sim.CleanUp();
                 return null;

@@ -21,7 +21,7 @@ PROJECT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
                        "Sts2Headless", "Sts2Headless.csproj")
 
 # Language setting (set by --lang flag)
-LANG = "both"  # "en", "zh", or "both"
+LANG = "zh"  # "en", "zh", or "both"
 
 # ─── Display helpers ───
 
@@ -353,6 +353,56 @@ def show_event(state):
 
 # ─── Input handling ───
 
+def _render_map(map_data):
+    """Render a full ASCII map from get_map response."""
+    ctx = map_data.get("context", {})
+    act = n(ctx.get("act_name", "?"))
+    floor = ctx.get("floor", "?")
+    print(f"\n  {c(f'{act} — Floor {floor}', 'bold')}")
+
+    type_icons = {
+        "Monster": "⚔", "Elite": "💀", "Boss": "👹",
+        "RestSite": "🏕", "Shop": "🏪", "Treasure": "💎",
+        "Event": "❓", "Unknown": "❓", "Ancient": "🏛",
+        "Unassigned": "·",
+    }
+
+    rows = map_data.get("rows", [])
+    cur = map_data.get("current_coord")
+    max_col = 0
+    for row in rows:
+        for node in row:
+            max_col = max(max_col, node.get("col", 0))
+
+    # Render from bottom (row 0) to top (boss)
+    boss = map_data.get("boss", {})
+    print(f"  {'':>4} {c('👹 BOSS', 'red')}")
+    print(f"  {'':>4} {'│':^{(max_col+1)*4}}")
+
+    for row_idx in range(len(rows) - 1, -1, -1):
+        row = rows[row_idx]
+        # Build row display
+        cells = ['  '] * (max_col + 1)
+        for node in row:
+            col = node.get("col", 0)
+            typ = node.get("type", "?")
+            icon = type_icons.get(typ, "?")
+            visited = node.get("visited", False)
+            is_cur = node.get("current", False)
+
+            if is_cur:
+                cells[col] = c(f"[{icon}]", "green")
+            elif visited:
+                cells[col] = c(f" {icon} ", "dim")
+            else:
+                cells[col] = f" {icon} "
+
+        row_num = rows[row_idx][0].get("row", row_idx) if rows[row_idx] else row_idx
+        line = "".join(f"{cell:^4}" for cell in cells)
+        print(f"  {row_num:>2}│ {line}")
+
+    print()
+
 def get_input(prompt, valid_options=None, state=None):
     """Get user input with validation. Supports meta-commands: help, map, deck, potions."""
     while True:
@@ -403,18 +453,17 @@ def get_input(prompt, valid_options=None, state=None):
             for r in p.get("relics", []):
                 print(f"  🔶 {relic_str(r)}")
             continue
-        if raw == "map" and state:
-            ctx = state.get("context", {})
-            act = n(ctx.get("act_name", "?"))
-            floor = ctx.get("floor", "?")
-            room = ctx.get("room_type", "?")
-            print(f"  {c(act, 'bold')} Floor {floor} — current room: {room}")
-            choices = state.get("choices", [])
-            if choices:
-                type_icons = {"Monster":"⚔","Elite":"💀","Boss":"👹","RestSite":"🏕","Shop":"🏪","Treasure":"💎","Event":"❓","Unknown":"❓","Ancient":"🏛"}
-                for ch in choices:
-                    icon = type_icons.get(ch["type"], "?")
-                    print(f"    [{ch['col']},{ch['row']}] {icon} {ch['type']}")
+        if raw == "map":
+            # Fetch full map from CLI
+            if hasattr(get_input, '_send'):
+                map_data = get_input._send({"cmd": "get_map"})
+                if map_data and map_data.get("type") == "map":
+                    _render_map(map_data)
+                else:
+                    print("  Map not available.")
+            elif state:
+                ctx = state.get("context", {})
+                print(f"  {c(n(ctx.get('act_name','?')), 'bold')} Floor {ctx.get('floor','?')}")
             continue
         if raw == "quit":
             print("Quitting...")
@@ -446,6 +495,9 @@ def play(character="Ironclad", seed=None, auto=False):
         proc.stdin.write(json.dumps(cmd) + "\n")
         proc.stdin.flush()
         return read()
+
+    # Wire send into get_input for map command
+    get_input._send = send
 
     try:
         ready = read()
