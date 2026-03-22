@@ -48,16 +48,6 @@ python3 python/play.py --lang en    # English
 
 ## 角色支持
 
-## 截图
-
-| 涅奥祝福 | 地图 | 战斗 |
-|:---:|:---:|:---:|
-| ![neow](docs/screenshots/neow.png) | ![map](docs/screenshots/map.png) | ![combat](docs/screenshots/combat.png) |
-
-| 卡牌奖励 | 篝火 | 商店 |
-|:---:|:---:|:---:|
-| ![reward](docs/screenshots/reward.png) | ![rest](docs/screenshots/rest.png) | ![shop](docs/screenshots/shop.png) |
-
 ## 角色支持
 
 | 角色 | 状态 |

@@ -67,16 +67,6 @@ dotnet run --project Sts2Headless/Sts2Headless.csproj
 
 Each command returns a JSON decision point (`map_select` / `combat_play` / `card_reward` / `rest_site` / `event_choice` / `shop` / `game_over`). All names are bilingual (en/zh).
 
-## Screenshots
-
-| Neow Blessing | Map | Combat |
-|:---:|:---:|:---:|
-| ![neow](docs/screenshots/neow.png) | ![map](docs/screenshots/map.png) | ![combat](docs/screenshots/combat.png) |
-
-| Card Reward | Rest Site | Shop |
-|:---:|:---:|:---:|
-| ![reward](docs/screenshots/reward.png) | ![rest](docs/screenshots/rest.png) | ![shop](docs/screenshots/shop.png) |
-
 ## Supported Characters
 
 | Character | Status |
