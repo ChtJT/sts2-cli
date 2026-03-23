@@ -3,13 +3,15 @@
 #
 # Prerequisites:
 #   - Slay the Spire 2 installed via Steam
-#   - .NET 9+ SDK (ARM64 for Apple Silicon, x64 for Intel/Linux)
+#   - .NET 10 SDK (ARM64 for Apple Silicon, x64 for Intel/Linux)
 #
 # Usage:
 #   ./setup.sh                    # Auto-detect Steam path
 #   ./setup.sh /path/to/game      # Manual game directory
 
 set -e
+
+TARGET_FRAMEWORK="net10.0"
 
 # ── Locate game directory ──
 
@@ -96,6 +98,8 @@ fi
 DOTNET=""
 if [ -x "$HOME/.dotnet-arm64/dotnet" ]; then
     DOTNET="$HOME/.dotnet-arm64/dotnet"
+elif [ -x "$HOME/.dotnet/dotnet" ]; then
+    DOTNET="$HOME/.dotnet/dotnet"
 elif command -v dotnet &>/dev/null; then
     DOTNET="dotnet"
 fi
@@ -103,7 +107,7 @@ fi
 if [ -z "$DOTNET" ]; then
     echo ""
     echo "❌ .NET SDK not found."
-    echo "   Install .NET 9+ from https://dotnet.microsoft.com/download"
+    echo "   Install .NET 10 SDK from https://dotnet.microsoft.com/download"
     echo "   Or set DOTNET env var to your dotnet binary path."
     exit 1
 fi
@@ -118,11 +122,11 @@ echo "🔨 Applying IL patches to sts2.dll..."
 
 # Create a temporary patching project
 PATCH_DIR=$(mktemp -d)
-cat > "$PATCH_DIR/Patcher.csproj" << 'PROJ'
+cat > "$PATCH_DIR/Patcher.csproj" << PROJ
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>$TARGET_FRAMEWORK</TargetFramework>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Mono.Cecil" Version="0.11.6" />
@@ -143,7 +147,7 @@ var resolver = new DefaultAssemblyResolver();
 var libDir = Path.GetDirectoryName(dllPath)!;
 resolver.AddSearchDirectory(libDir);
 // Also search for GodotSharp.dll in the GodotStubs output (fallback)
-var stubsDir = Path.Combine(Path.GetDirectoryName(libDir)!, "GodotStubs", "bin", "Debug", "net9.0");
+var stubsDir = Path.Combine(Path.GetDirectoryName(libDir)!, "GodotStubs", "bin", "Debug", "net10.0");
 if (Directory.Exists(stubsDir)) resolver.AddSearchDirectory(stubsDir);
 var module = ModuleDefinition.ReadModule(dllPath, new ReaderParameters {
     AssemblyResolver = resolver,

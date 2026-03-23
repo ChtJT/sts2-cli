@@ -11,6 +11,7 @@ obj/
 *.pyc
 .DS_Store
 .obsidian/
-agent/
+agent/state/
+agent/__pycache__/
 play_*.py
 CLAUDE.md

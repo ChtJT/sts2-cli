@@ -13,7 +13,7 @@ Runs the real game engine headless in your terminal — all damage, card effects
 
 Requirements:
 - [Slay the Spire 2](https://store.steampowered.com/app/2868840/Slay_the_Spire_2/) on Steam
-- [.NET 9+ SDK](https://dotnet.microsoft.com/download)
+- [.NET 10 SDK](https://dotnet.microsoft.com/download)
 - Python 3.9+
 
 ```bash
@@ -107,7 +107,7 @@ sts2.dll (game engine, IL patched)
 
 需要：
 - [Slay the Spire 2](https://store.steampowered.com/app/2868840/Slay_the_Spire_2/) (Steam)
-- [.NET 9+ SDK](https://dotnet.microsoft.com/download)
+- [.NET 10 SDK](https://dotnet.microsoft.com/download)
 - Python 3.9+
 
 ```bash

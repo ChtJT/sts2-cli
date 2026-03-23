@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Godot</RootNamespace>
     <AssemblyName>GodotSharp</AssemblyName>
     <Version>4.5.1.0</Version>

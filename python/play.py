@@ -15,10 +15,26 @@ import sys
 import os
 import argparse
 import random
+import xml.etree.ElementTree as ET
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROJECT = os.path.join(ROOT, "Sts2Headless", "Sts2Headless.csproj")
 LIB_DIR = os.path.join(ROOT, "lib")
+
+
+def _read_target_framework():
+    """Read the SDK target framework from the project file."""
+    try:
+        root = ET.parse(PROJECT).getroot()
+        for elem in root.iter():
+            if elem.tag.endswith("TargetFramework") and elem.text:
+                return elem.text.strip()
+    except (ET.ParseError, FileNotFoundError):
+        pass
+    return "net10.0"
+
+
+TARGET_FRAMEWORK = _read_target_framework()
 
 def _find_dotnet():
     """Find .NET SDK binary."""
@@ -119,7 +135,7 @@ def ensure_setup():
     # Check .NET SDK
     if not DOTNET:
         print("❌ .NET SDK not found.")
-        print("   Install .NET 9+ from https://dotnet.microsoft.com/download")
+        print("   Install .NET 10 SDK from https://dotnet.microsoft.com/download")
         sys.exit(1)
 
     # Check lib/sts2.dll exists
@@ -144,7 +160,7 @@ def ensure_setup():
         os.environ["STS2_GAME_DIR"] = game_dir
 
     # Check if built
-    exe_dir = os.path.join(ROOT, "Sts2Headless", "bin", "Debug", "net9.0")
+    exe_dir = os.path.join(ROOT, "Sts2Headless", "bin", "Debug", TARGET_FRAMEWORK)
     exe = os.path.join(exe_dir, "Sts2Headless.dll")
     if not os.path.isfile(exe) or os.path.getmtime(sts2_dll) > os.path.getmtime(exe):
         print("🏗️  Building...")
