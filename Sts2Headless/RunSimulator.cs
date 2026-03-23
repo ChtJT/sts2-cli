@@ -807,6 +807,20 @@ public class RunSimulator
         _cardSelector.ResolvePendingByIndices(indices);
         _syncCtx.Pump();
         WaitForActionExecutor();
+
+        // Extra wait for rest-site SMITH: the background ChooseLocalOption task
+        // needs time to complete the upgrade after card selection resolves.
+        if (_runState?.CurrentRoom is RestSiteRoom)
+        {
+            Thread.Sleep(200);
+            _syncCtx.Pump();
+            WaitForActionExecutor();
+            // Force to map after SMITH completes (same pattern as HEAL)
+            Log("Card selection in rest site (SMITH), forcing to map");
+            ForceToMap();
+            return MapSelectState();
+        }
+
         return DetectDecisionPoint();
     }
 
