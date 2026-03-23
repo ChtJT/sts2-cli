@@ -16,6 +16,11 @@ Requirements:
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
 - Python 3.9+
 
+Version note:
+- The project currently targets `net10.0`.
+- It does not target `net11.0`.
+- If your machine only has a newer `.NET 11` SDK/runtime, it may still run because `Sts2Headless` enables `RollForward=LatestMajor`, but `.NET 10` remains the recommended setup.
+
 ```bash
 git clone https://github.com/wuhao21/sts2-cli.git
 cd sts2-cli
@@ -109,6 +114,11 @@ sts2.dll (game engine, IL patched)
 - [Slay the Spire 2](https://store.steampowered.com/app/2868840/Slay_the_Spire_2/) (Steam)
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
 - Python 3.9+
+
+版本说明：
+- 当前项目 target framework 是 `net10.0`。
+- 不是 `net11.0`。
+- 如果你机器上只有更新的 `.NET 11` SDK/runtime，通常也可以运行，因为 `Sts2Headless` 开了 `RollForward=LatestMajor`；但推荐环境仍然是 `.NET 10`。
 
 ```bash
 git clone https://github.com/wuhao21/sts2-cli.git

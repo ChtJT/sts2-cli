@@ -173,6 +173,7 @@ class OpenAIProvider(AgentProvider):
             "Think step by step internally before acting. "
             "Return exactly one required function call. "
             "Each function already encodes one legal API shape for the current state. "
+            "Use memory.run_plan, memory.deck_profile, and memory.decision_context as the primary strategic context. "
             "Choose the correct function and fill only its defined fields. "
             "Always include 2-5 concise public decision_steps, a short rationale, and a short memory_note. "
             "Do not invent indices, unsupported fields, or unsupported actions."
@@ -186,6 +187,11 @@ class OpenAIProvider(AgentProvider):
             "decision": state.get("decision", state.get("type")),
             "allowed_actions": self._allowed_actions(state),
             "available_tools": self._tool_names(state),
+            "strategy_focus": {
+                "run_plan": payload.get("memory", {}).get("run_plan", []),
+                "deck_profile": payload.get("memory", {}).get("deck_profile", {}),
+                "decision_context": payload.get("memory", {}).get("decision_context", {}),
+            },
             "action_hints": self._action_hints(state),
             "state": state,
             "memory": payload.get("memory", {}),

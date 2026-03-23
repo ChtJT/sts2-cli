@@ -2,6 +2,11 @@
 
 这个目录现在提供了一层可直接跑在 `sts2-cli` 之上的 agent scaffold，目标不是先把 OpenAI/Codex 真接上，而是先把自动运行、分层 memory、RAG、策略循环和 provider 抽象搭出来。
 
+版本说明：
+- 当前底层 C# 项目 target framework 是 `net10.0`。
+- 不是 `net11.0`。
+- 如果本机装的是更新的 `.NET 11` SDK/runtime，通常也能启动，但推荐环境仍然是 `.NET 10`。
+
 ## 入口
 
 ```bash

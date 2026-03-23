@@ -155,13 +155,13 @@ class AgentRunner:
                 queries.append(f"combat {enemy_names}")
             queries.append("combat play card target enemy")
         elif decision == "rest_site":
-            queries.append("rest site heal smith")
+            queries.append("rest site heal smith threshold best upgrade target")
         elif decision == "card_reward":
-            queries.append("card reward skip curse status")
+            queries.append("card reward skip curse status deck dilution efficient pick")
         elif decision == "event_choice":
             queries.append("event choice risk reward")
         elif decision == "shop":
-            queries.append("shop leave remove card")
+            queries.append("shop card removal discounted card relic priority potion slots")
         queries.append("bug tracker")
         return queries
 
