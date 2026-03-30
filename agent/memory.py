@@ -563,6 +563,7 @@ class MemorySnapshot:
     deck_profile: Dict[str, Any]
     run_plan: List[str]
     decision_context: Dict[str, Any]
+    skills: Dict[str, Any]
     world_model: Dict[str, Any]
     recent_events: List[Dict[str, Any]]
     recent_reflections: List[Dict[str, Any]]
@@ -574,6 +575,7 @@ class MemorySnapshot:
             "deck_profile": self.deck_profile,
             "run_plan": self.run_plan,
             "decision_context": self.decision_context,
+            "skills": self.skills,
             "world_model": self.world_model,
             "recent_events": self.recent_events,
             "recent_reflections": self.recent_reflections,
@@ -589,8 +591,10 @@ class LayeredMemory:
         self.working_path = self.base_dir / "working_memory.json"
         self.episodes_path = self.base_dir / "episodes.jsonl"
         self.reflections_path = self.base_dir / "reflections.jsonl"
+        self.rl_dataset_path = self.base_dir / "rl_transitions.jsonl"
         self.run_id: Optional[str] = None
         self.run_steps_path: Optional[Path] = None
+        self.run_rl_path: Optional[Path] = None
         self.working = self._load_working()
 
     def _load_working(self) -> Dict[str, Any]:
@@ -601,6 +605,7 @@ class LayeredMemory:
             "deck_profile": {},
             "run_plan": [],
             "decision_context": {},
+            "skills": {},
             "world_model": {},
             "current_run": {},
             "recent_events": [],
@@ -613,6 +618,7 @@ class LayeredMemory:
         run_dir = self.runs_dir / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         self.run_steps_path = run_dir / "steps.jsonl"
+        self.run_rl_path = run_dir / "rl_transitions.jsonl"
         self.working["current_run"] = {
             "run_id": run_id,
             "started_at": _utc_now(),
@@ -622,6 +628,7 @@ class LayeredMemory:
         self.working["deck_profile"] = {}
         self.working["run_plan"] = []
         self.working["decision_context"] = {}
+        self.working["skills"] = {}
         self.working["world_model"] = {}
         self.working["recent_events"] = []
         self.working["recent_reflections"] = []
@@ -635,6 +642,7 @@ class LayeredMemory:
             deck_profile=self.working.get("deck_profile", {}),
             run_plan=self.working.get("run_plan", [])[-4:],
             decision_context=self.working.get("decision_context", {}),
+            skills=self.working.get("skills", {}),
             world_model=self.working.get("world_model", {}),
             recent_events=self.working.get("recent_events", [])[-limit:],
             recent_reflections=self.working.get("recent_reflections", [])[-3:],
@@ -678,6 +686,11 @@ class LayeredMemory:
         self.working["last_updated"] = _utc_now()
         _safe_write_json(self.working_path, self.working)
 
+    def update_skills(self, skills: Dict[str, Any]) -> None:
+        self.working["skills"] = skills
+        self.working["last_updated"] = _utc_now()
+        _safe_write_json(self.working_path, self.working)
+
     def record_step(
         self,
         step: int,
@@ -689,7 +702,10 @@ class LayeredMemory:
         memory_note: str,
         decision_steps: Iterable[str],
         retrieval_hits: Iterable[Dict[str, Any]],
+        agent_context: Optional[Dict[str, Any]] = None,
+        rl_transition: Optional[Dict[str, Any]] = None,
     ) -> None:
+        context_payload = agent_context or {}
         summary = {
             "step": step,
             "decision": state.get("decision", state.get("type")),
@@ -702,7 +718,11 @@ class LayeredMemory:
             "rationale": rationale,
             "memory_note": memory_note,
             "decision_steps": list(decision_steps),
+            "agent_context": context_payload,
         }
+        if rl_transition is not None:
+            summary["rl_reward"] = rl_transition.get("reward")
+            summary["rl_terminal_type"] = rl_transition.get("terminal_type")
         self.working.setdefault("recent_events", []).append(summary)
         self.working["recent_events"] = self.working["recent_events"][-20:]
         self.working["last_updated"] = _utc_now()
@@ -720,10 +740,15 @@ class LayeredMemory:
             "memory_note": memory_note,
             "decision_steps": list(decision_steps),
             "retrieval": list(retrieval_hits),
+            "agent_context": context_payload,
         }
         _append_jsonl(self.episodes_path, event)
         if self.run_steps_path:
             _append_jsonl(self.run_steps_path, event)
+        if rl_transition is not None:
+            _append_jsonl(self.rl_dataset_path, rl_transition)
+            if self.run_rl_path:
+                _append_jsonl(self.run_rl_path, rl_transition)
 
     def reflect(self, kind: str, summary: str, metadata: Optional[Dict[str, Any]] = None) -> None:
         entry = {

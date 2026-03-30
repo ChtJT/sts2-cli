@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
+from pathlib import Path
 
 from agent.memory import LayeredMemory
 
@@ -143,6 +145,70 @@ class LayeredMemoryTests(unittest.TestCase):
         self.assertTrue(context["top_card_buys"])
         self.assertEqual(context["top_card_buys"][0]["name"], "Rage")
         self.assertTrue(any("remov" in item.lower() for item in context["priorities"]))
+
+    def test_record_step_persists_agent_context_summary(self) -> None:
+        memory = self._memory()
+        memory.begin_run("run-4", {"provider": "openai", "character": "Ironclad"})
+        memory.record_step(
+            step=1,
+            state={"decision": "map_select", "context": {"floor": 5}, "player": {"hp": 60, "gold": 90}},
+            command={"cmd": "action", "action": "select_map_node", "args": {"col": 1, "row": 2}},
+            response={"decision": "combat_play"},
+            provider_name="openai",
+            rationale="Take the safer route.",
+            memory_note="Routing toward rest site.",
+            decision_steps=["HP is medium.", "Path offers a rest site."],
+            retrieval_hits=[{"source": "playbook.md", "title": "Map", "score": 1.2}],
+            agent_context={
+                "skills": {"primary_skill": {"name": "route_survival"}},
+                "safety": {"warnings": ["Avoid elite."]},
+                "episodic": [{"run_id": "old-run", "step": 12}],
+                "world_model": {"strategy_mode": "survival"},
+            },
+            rl_transition={
+                "ts": "2026-03-30T00:00:00Z",
+                "run_id": "run-4",
+                "step": 1,
+                "provider": "openai",
+                "character": "Ironclad",
+                "decision": "map_select",
+                "action": "select_map_node",
+                "action_key": "select_map_node:1:2",
+                "command": {"cmd": "action", "action": "select_map_node", "args": {"col": 1, "row": 2}},
+                "available_actions": ["select_map_node"],
+                "action_hints": {"choices": [{"col": 1, "row": 2}]},
+                "chosen_action_features": {"node_type": "Monster"},
+                "state": {"decision": "map_select"},
+                "next_state": {"decision": "combat_play"},
+                "state_features": {"strategy_mode": "survival"},
+                "next_state_features": {"decision": "combat_play"},
+                "reward": 0.42,
+                "reward_breakdown": {"room_progress": 0.42, "total": 0.42},
+                "done": False,
+                "terminal_type": "continuing",
+                "agent_context": {"world_model": {"strategy_mode": "survival"}},
+                "metadata": {},
+            },
+        )
+
+        snapshot = memory.snapshot().to_dict()
+        self.assertEqual(
+            snapshot["recent_events"][-1]["agent_context"]["skills"]["primary_skill"]["name"],
+            "route_survival",
+        )
+
+        steps_path = Path(memory.run_steps_path)
+        lines = steps_path.read_text(encoding="utf-8").splitlines()
+        event = json.loads(lines[-1])
+        self.assertEqual(event["agent_context"]["world_model"]["strategy_mode"], "survival")
+        self.assertEqual(event["agent_context"]["episodic"][0]["run_id"], "old-run")
+        self.assertEqual(snapshot["recent_events"][-1]["rl_reward"], 0.42)
+
+        rl_dataset = Path(memory.rl_dataset_path).read_text(encoding="utf-8").splitlines()
+        self.assertEqual(json.loads(rl_dataset[-1])["reward"], 0.42)
+
+        run_rl = Path(memory.run_rl_path).read_text(encoding="utf-8").splitlines()
+        self.assertEqual(json.loads(run_rl[-1])["terminal_type"], "continuing")
 
 
 if __name__ == "__main__":

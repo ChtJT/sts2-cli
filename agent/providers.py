@@ -181,6 +181,9 @@ class OpenAIProvider(AgentProvider):
                 "You are controlling Slay the Spire 2 through a strict action interface. "
                 "Return exactly one required function call. "
                 "Each function already encodes one legal API shape for the current state. "
+                "Use prompt_context as the complete strategic summary for this step. "
+                "Respect safety.hard_rules and avoid choices that directly conflict with safety warnings when a safer legal line exists. "
+                "Use the selected skill and episodic examples as guidance, not rigid scripts. "
                 "Choose the correct function and fill only its defined fields. "
                 "Include brief public decision notes, a short rationale, and a short memory note. "
                 "Do not invent indices, unsupported fields, or unsupported actions."
@@ -189,7 +192,8 @@ class OpenAIProvider(AgentProvider):
             "You are controlling Slay the Spire 2 through a strict action interface. "
             "Return exactly one required function call. "
             "Each function already encodes one legal API shape for the current state. "
-            "Use memory.run_plan, memory.deck_profile, memory.decision_context, and world_model as the primary strategic context. "
+            "Use prompt_context as the complete strategic summary for this step. "
+            "Respect safety.hard_rules and avoid choices that directly conflict with safety warnings when a safer legal line exists. "
             "Choose the correct function and fill only its defined fields. "
             "Always include 2-5 concise public decision notes, a short rationale, and a short memory note. "
             "Do not invent indices, unsupported fields, or unsupported actions."
@@ -205,23 +209,12 @@ class OpenAIProvider(AgentProvider):
             "available_tools": self._tool_names(state),
             "action_hints": self._action_hints(state),
             "state": state,
+            "prompt_context": payload.get("prompt_context", {}),
             "provider_feedback": payload.get("provider_feedback"),
         }
+        prompt["strategy_focus"] = payload.get("prompt_context", {})
         if safe_mode:
-            prompt["strategy_focus"] = {
-                "run_plan": payload.get("memory", {}).get("run_plan", []),
-                "decision_context": payload.get("memory", {}).get("decision_context", {}),
-            }
-        else:
-            prompt["strategy_focus"] = {
-                "run_plan": payload.get("memory", {}).get("run_plan", []),
-                "deck_profile": payload.get("memory", {}).get("deck_profile", {}),
-                "decision_context": payload.get("memory", {}).get("decision_context", {}),
-                "world_model": payload.get("world_model", {}),
-            }
-            prompt["memory"] = payload.get("memory", {})
-            prompt["world_model"] = payload.get("world_model", {})
-            prompt["retrieval"] = payload.get("retrieval", [])
+            prompt["safe_mode"] = True
         return json.dumps(prompt, ensure_ascii=False, indent=2)
 
     def _tool_names(self, state: Dict[str, Any]) -> List[str]:
